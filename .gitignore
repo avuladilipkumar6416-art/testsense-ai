@@ -1,0 +1,9 @@
+venv/
+.env
+reports/
+__pycache__/
+*.pyc
+*.class
+target/
+.idea/
+*.iml
