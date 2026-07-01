@@ -1,2 +1,5 @@
+# Gemini AI API — talks to Google's Gemini model
 google-genai
+
+# Reads .env file to load API keys safely into Python
 python-dotenv
