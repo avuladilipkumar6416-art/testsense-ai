@@ -43,10 +43,14 @@ def analyze_failure(failure_text: str):
     )
     
     response_text = response.text
-    return json.loads(response_text)
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError:
+        print("Gemini returned invalid JSON")
+        return None
 
 if __name__ == "__main__":
-    fake_failure = """
+    failure_1 = """
     Test Name: LoginTest.testValidLogin
     Error Type: NoSuchElementException
     Error Message: Unable to locate element: #login-btn
@@ -56,11 +60,50 @@ if __name__ == "__main__":
     Browser: Chrome 124
     Environment: staging
     """
+    failure_2 = """
+    Test Name: PaymentTest.testSuccessfulPayment
+    Error Type: AssertionError
+    Error message: Expected HTTP 200 but got HTTP 500 Internal Server Error
+    Stack Trace: 
+        at PaymentTest.verifyPaymentStatus(PaymentTest.java:67)
+        at PaymentTest.testSuccessfulPayment(PaymentTest.java:34)
+    Browser: Chrome 124
+    Environment: Staging
+    """
+    failure_3 = """
+    Test Name: DatabaseTest.testUserDataRetrieval
+    Error Type: java.net.ConnectException
+    Error Message: Connection refused to localhost:5432
+    Stack Trace:
+        at DatabaseTest.setUp(DatabaseTest.java:23)
+        at DatabaseTest.testUserDataRetrieval(DatabaseTest.java:45)
+    Browser: Chrome 124
+    Environment: staging
+    """
     
-    result = analyze_failure(fake_failure)
-    print(result["failure_type"])
-    print(result["confidence"])
-    print(result["suggested_fix"])
-    print(result["root_cause"])
-    print(result["is_real_bug"])
-    print(result["severity"])
+    print("--- Failure 1 ---")
+    result_1 = analyze_failure(failure_1)
+    print(f"Type:       {result_1['failure_type']}")
+    print(f"Cause:      {result_1['root_cause']}")
+    print(f"Is bug:     {result_1['is_real_bug']}")
+    print(f"Confidence: {result_1['confidence']}%")
+    print(f"Fix:        {result_1['suggested_fix']}")
+    print(f"Severity:   {result_1['severity']}")
+
+    print("---FAILURE 2---")
+    result_2 = analyze_failure(failure_2)
+    print(f"Type:       {result_2['failure_type']}")
+    print(f"Cause:      {result_2['root_cause']}")
+    print(f"Is bug:     {result_2['is_real_bug']}")
+    print(f"Confidence: {result_2['confidence']}%")
+    print(f"Fix:        {result_2['suggested_fix']}")
+    print(f"Severity:   {result_2['severity']}")
+
+    print("---FAILURE 3---")
+    result_3 = analyze_failure(failure_3)
+    print(f"Type:       {result_3['failure_type']}")
+    print(f"Cause:      {result_3['root_cause']}")
+    print(f"Is bug:     {result_3['is_real_bug']}")
+    print(f"Confidence: {result_3['confidence']}%")
+    print(f"Fix:        {result_3['suggested_fix']}")
+    print(f"Severity:   {result_3['severity']}")
