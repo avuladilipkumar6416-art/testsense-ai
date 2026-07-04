@@ -1,10 +1,16 @@
 import truststore
 truststore.inject_into_ssl()
 
+import logging
 import os
 import json
 from dotenv import load_dotenv
 from google import genai
+
+logging.basicConfig(level=logging.INFO,
+                    format= '%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+logging.getLogger("google").setLevel(logging.WARNING)
 
 load_dotenv()
 
@@ -37,7 +43,7 @@ def analyze_failure(failure_text: str):
     client = get_gemini_client()
     
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-2.0-flash-lite",
         contents=failure_text,
         config={"system_instruction": SYSTEM_INSTRUCTION}
     )
@@ -46,7 +52,7 @@ def analyze_failure(failure_text: str):
     try:
         return json.loads(response_text)
     except json.JSONDecodeError:
-        print("Gemini returned invalid JSON")
+        logger.error("Gemini returned invalid JSON")
         return None
 
 if __name__ == "__main__":
@@ -81,29 +87,29 @@ if __name__ == "__main__":
     Environment: staging
     """
     
-    print("--- Failure 1 ---")
+    logger.info("--- Failure 1 ---")
     result_1 = analyze_failure(failure_1)
-    print(f"Type:       {result_1['failure_type']}")
-    print(f"Cause:      {result_1['root_cause']}")
-    print(f"Is bug:     {result_1['is_real_bug']}")
-    print(f"Confidence: {result_1['confidence']}%")
-    print(f"Fix:        {result_1['suggested_fix']}")
-    print(f"Severity:   {result_1['severity']}")
+    logger.info(f"Type:       {result_1['failure_type']}")
+    logger.info(f"Cause:      {result_1['root_cause']}")
+    logger.info(f"Is bug:     {result_1['is_real_bug']}")
+    logger.info(f"Confidence: {result_1['confidence']}%")
+    logger.info(f"Fix:        {result_1['suggested_fix']}")
+    logger.info(f"Severity:   {result_1['severity']}")
 
-    print("---FAILURE 2---")
+    logger.info("---FAILURE 2---")
     result_2 = analyze_failure(failure_2)
-    print(f"Type:       {result_2['failure_type']}")
-    print(f"Cause:      {result_2['root_cause']}")
-    print(f"Is bug:     {result_2['is_real_bug']}")
-    print(f"Confidence: {result_2['confidence']}%")
-    print(f"Fix:        {result_2['suggested_fix']}")
-    print(f"Severity:   {result_2['severity']}")
+    logger.info(f"Type:       {result_2['failure_type']}")
+    logger.info(f"Cause:      {result_2['root_cause']}")
+    logger.info(f"Is bug:     {result_2['is_real_bug']}")
+    logger.info(f"Confidence: {result_2['confidence']}%")
+    logger.info(f"Fix:        {result_2['suggested_fix']}")
+    logger.info(f"Severity:   {result_2['severity']}")
 
-    print("---FAILURE 3---")
+    logger.info("---FAILURE 3---")
     result_3 = analyze_failure(failure_3)
-    print(f"Type:       {result_3['failure_type']}")
-    print(f"Cause:      {result_3['root_cause']}")
-    print(f"Is bug:     {result_3['is_real_bug']}")
-    print(f"Confidence: {result_3['confidence']}%")
-    print(f"Fix:        {result_3['suggested_fix']}")
-    print(f"Severity:   {result_3['severity']}")
+    logger.info(f"Type:       {result_3['failure_type']}")
+    logger.info(f"Cause:      {result_3['root_cause']}")
+    logger.info(f"Is bug:     {result_3['is_real_bug']}")
+    logger.info(f"Confidence: {result_3['confidence']}%")
+    logger.info(f"Fix:        {result_3['suggested_fix']}")
+    logger.info(f"Severity:   {result_3['severity']}")
