@@ -3,3 +3,7 @@ google-genai
 
 # Reads .env file to load API keys safely into Python
 python-dotenv
+
+langchain
+langchain-google-genai
+langchain-core
