@@ -1,0 +1,3 @@
+INFO - Test started
+INFO - Browser opened: Chrome
+ERROR - Element #login-btn not found after 10s
