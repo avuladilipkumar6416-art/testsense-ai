@@ -25,7 +25,7 @@ def get_llm_with_tools():
         the log reader and screenshot reader tools.
     """
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-3.5-flash",
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=0.1
     )

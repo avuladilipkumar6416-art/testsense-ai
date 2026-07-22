@@ -47,7 +47,7 @@ def analyze_failure(failure_text: str):
         client = get_gemini_client()
         
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=failure_text,
             config={"system_instruction": SYSTEM_INSTRUCTION}
         )
