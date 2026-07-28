@@ -1,50 +1,184 @@
-# agent/basic_agent_test.py
 import os
+import json
+import logging
+import warnings
+warnings.filterwarnings("ignore")
+
+import truststore
+truststore.inject_into_ssl()
+
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
+
 load_dotenv()
 
-@tool
-def read_log_file(file_path: str) -> str:
+# Silence noisy third-party loggers
+for noisy_logger in ["google", "google.genai", "google.auth", "httpx", "httpcore", "tenacity"]:
+    logging.getLogger(noisy_logger).setLevel(logging.CRITICAL)
+
+logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPT = """You are a senior test failure analysis expert.
+Your goal is to classify test failures accurately using available tools.
+
+After investigating, respond ONLY with this exact JSON:
+{"failure_type":"TEST_ISSUE or REAL_BUG or ENVIRONMENT_ISSUE","root_cause":"one sentence","is_real_bug":true or false,"confidence":0-100,"suggested_fix":"one sentence","severity":"LOW or MEDIUM or HIGH"}
+
+Classification rules:
+- TEST_ISSUE: locator changed, wrong selector, timing, bad test data
+- REAL_BUG: application logic wrong, API error, feature broken
+- ENVIRONMENT_ISSUE: DB down, network failure, infrastructure problem
+
+Respond ONLY with the JSON. No extra text."""
+
+
+class TestFailureAnalyzerAgent:
     """
-    Read a test execution log file.
-    Use when you need to understand what happened during test execution.
+    ReAct agent that analyzes Selenium test failures.
+    Uses Gemini as primary LLM, falls back to Ollama if unavailable.
+    Create one instance, call analyze() for each failure.
     """
-    try:
-        with open(file_path, 'r') as f:
-            return f.read()
-    except FileNotFoundError:
-        return f"Log file not found: {file_path}. Simulated content: Test started at 10:30, element #login-btn not found after 10s."
 
-tools = [read_log_file]
+    def __init__(self):
+        self.llm = self._create_llm()
+        self.tools = self._build_tools()
+        self.agent = create_react_agent(
+            self.llm,
+            self.tools,
+            prompt=SYSTEM_PROMPT
+        )
+        logger.info("TestFailureAnalyzerAgent initialized")
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
-    google_api_key=os.getenv("GEMINI_API_KEY"),
-    temperature=0.1
-)
+    def _create_llm(self):
+        """Try Gemini first, fall back to Ollama if unavailable."""
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-3.5-flash",
+                google_api_key=os.getenv("GEMINI_API_KEY"),
+                temperature=0.1
+            )
+            llm.invoke("hi")
+            logger.info("LLM: Gemini gemini-3.5-flash (primary)")
+            return llm
+        except Exception:
+            logger.warning("Gemini unavailable — switching to Ollama (local)")
+            from langchain_ollama import ChatOllama
+            return ChatOllama(model="llama3.2", temperature=0.1)
 
-system_prompt = """You are an expert test failure analyzer. Use the available tools to investigate failures.
+    def _build_tools(self) -> list:
 
-Only call tools if you genuinely need more information to make a decision.
+        @tool
+        def read_log_file(file_path: str) -> str:
+            """
+            Reads a test execution log file.
+            Use when you need to understand what happened during
+            test execution — what pages loaded, what errors occurred.
+            """
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                return content if content.strip() else "Log file is empty."
+            except FileNotFoundError:
+                return f"Log file not found at: {file_path}"
+            except Exception as e:
+                return f"Error reading log: {str(e)}"
 
-When you have enough information, respond with ONLY this JSON format:
-{"failure_type": "TEST_ISSUE|REAL_BUG|ENVIRONMENT_ISSUE", "root_cause": "string", "is_real_bug": boolean, "confidence": 0-100, "suggested_fix": "string", "severity": "LOW|MEDIUM|HIGH"}"""
+        @tool
+        def read_screenshot(screenshot_path: str) -> str:
+            """
+            Reads a test failure screenshot.
+            Use when you need visual context about what was on
+            screen when the test failed.
+            """
+            from pathlib import Path
+            try:
+                path = Path(screenshot_path)
+                if not path.exists():
+                    return f"Screenshot not found: {screenshot_path}"
+                size = path.stat().st_size
+                return f"Screenshot loaded: {path.name}, {size} bytes."
+            except Exception as e:
+                return f"Error reading screenshot: {str(e)}"
 
-agent = create_react_agent(
-    model=llm,
-    tools=tools,
-    prompt=system_prompt
-)
+        return [read_log_file, read_screenshot]
 
-# Run it
-result = agent.invoke({
-    "messages": [HumanMessage(content="LoginTest failed with NoSuchElementException on #login-btn. Log is at /reports/logs/login.log. What happened?")]
-})
+    def analyze(self, failure_text: str) -> dict:
+        """
+        Analyze a test failure and return a structured verdict.
 
-print("\n" + "="*50)
-print("FINAL RESULT:")
-print(result['messages'][-1].content)
+        Args:
+            failure_text: Full failure description including error type,
+                         message, log path, screenshot path, environment.
+
+        Returns:
+            Dict with failure_type, root_cause, is_real_bug,
+            confidence, suggested_fix, severity — or None if failed.
+        """
+        logger.info("Analyzing failure...")
+
+        try:
+            result = self.agent.invoke({
+                "messages": [HumanMessage(content=failure_text)]
+            })
+
+            last_message = result["messages"][-1]
+
+            if isinstance(last_message.content, list):
+                output = " ".join(
+                    item.get("text", "") if isinstance(item, dict) else str(item)
+                    for item in last_message.content
+                )
+            else:
+                output = last_message.content
+
+            # Strip markdown code fences if present
+            if "```" in output:
+                output = output[output.find("{"):output.rfind("}") + 1]
+
+            verdict = json.loads(output)
+            logger.info(f"Done — {verdict['failure_type']} (confidence: {verdict['confidence']}%)")
+            return verdict
+
+        except json.JSONDecodeError:
+            logger.error("Agent returned invalid JSON")
+            return None
+        except Exception as e:
+            logger.error(f"Analysis failed: {e}")
+            return None
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+
+    agent = TestFailureAnalyzerAgent()
+
+    failure = """
+    Test Name: LoginTest.testValidLogin
+    Error Type: NoSuchElementException
+    Error Message: Unable to locate element: #login-btn
+    Stack Trace:
+        at LoginPage.clickLoginButton(LoginPage.java:47)
+        at LoginTest.testValidLogin(LoginTest.java:23)
+    Log file: test_sample.log
+    Screenshot: fake_screenshot.png
+    Environment: staging
+    """
+
+    verdict = agent.analyze(failure)
+
+    if verdict:
+        print("\n--- VERDICT ---")
+        print(f"Type:       {verdict['failure_type']}")
+        print(f"Cause:      {verdict['root_cause']}")
+        print(f"Is bug:     {verdict['is_real_bug']}")
+        print(f"Confidence: {verdict['confidence']}%")
+        print(f"Fix:        {verdict['suggested_fix']}")
+        print(f"Severity:   {verdict['severity']}")
+    else:
+        print("Analysis failed")
