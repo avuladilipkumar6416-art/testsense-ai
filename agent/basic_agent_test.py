@@ -14,9 +14,24 @@ from langgraph.prebuilt import create_react_agent
 
 load_dotenv()
 
-# Silence noisy third-party loggers
-for noisy_logger in ["google", "google.genai", "google.auth", "httpx", "httpcore", "tenacity"]:
-    logging.getLogger(noisy_logger).setLevel(logging.CRITICAL)
+
+class _SuppressNoiseFilter(logging.Filter):
+    """Filter out noisy third-party log lines."""
+    SUPPRESS = ["Retrying", "AFC is enabled", "HTTP Request"]
+
+    def filter(self, record):
+        msg = record.getMessage()
+        return not any(phrase in msg for phrase in self.SUPPRESS)
+
+
+# Apply filter to root logger — catches everything
+logging.root.addFilter(_SuppressNoiseFilter())
+
+# Also silence by logger name as a second layer
+for _name in ["google", "google.genai", "google.auth", "google.genai._api_client",
+              "httpx", "httpcore", "tenacity", "urllib3"]:
+    logging.getLogger(_name).setLevel(logging.CRITICAL)
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +57,8 @@ class TestFailureAnalyzerAgent:
     """
 
     def __init__(self):
-        self.llm = self._create_llm()
         self.tools = self._build_tools()
+        self.llm = self._create_llm()
         self.agent = create_react_agent(
             self.llm,
             self.tools,
@@ -53,20 +68,36 @@ class TestFailureAnalyzerAgent:
 
     def _create_llm(self):
         """Try Gemini first, fall back to Ollama if unavailable."""
+        import sys
+        import io
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
             llm = ChatGoogleGenerativeAI(
-                model="gemini-3.5-flash",
+                model="gemini-3.6-flash",
                 google_api_key=os.getenv("GEMINI_API_KEY"),
                 temperature=0.1
             )
-            llm.invoke("hi")
-            logger.info("LLM: Gemini gemini-3.5-flash (primary)")
+            # Suppress stderr during the test call
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+            try:
+                llm.invoke("hi")
+            finally:
+                sys.stderr = old_stderr
+
+            logger.info("LLM: Gemini gemini-3.6-flash (primary)")
             return llm
         except Exception:
-            logger.warning("Gemini unavailable — switching to Ollama (local)")
+            logger.warning("Gemini unavailable — using Ollama (local)")
             from langchain_ollama import ChatOllama
             return ChatOllama(model="llama3.2", temperature=0.1)
+
+    def _switch_to_ollama(self):
+        """Switch agent to Ollama mid-run."""
+        logger.warning("Gemini unavailable — switching to Ollama (local)")
+        from langchain_ollama import ChatOllama
+        self.llm = ChatOllama(model="llama3.2", temperature=0.1)
+        self.agent = create_react_agent(self.llm, self.tools, prompt=SYSTEM_PROMPT)
 
     def _build_tools(self) -> list:
 
@@ -108,6 +139,7 @@ class TestFailureAnalyzerAgent:
     def analyze(self, failure_text: str) -> dict:
         """
         Analyze a test failure and return a structured verdict.
+        Falls back to Ollama automatically if Gemini fails mid-analysis.
 
         Args:
             failure_text: Full failure description including error type,
@@ -124,6 +156,22 @@ class TestFailureAnalyzerAgent:
                 "messages": [HumanMessage(content=failure_text)]
             })
 
+        except Exception as e:
+            error_str = str(e)
+            if any(code in error_str for code in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]):
+                self._switch_to_ollama()
+                try:
+                    result = self.agent.invoke({
+                        "messages": [HumanMessage(content=failure_text)]
+                    })
+                except Exception as e2:
+                    logger.error(f"Ollama also failed: {e2}")
+                    return None
+            else:
+                logger.error(f"Analysis failed: {e}")
+                return None
+
+        try:
             last_message = result["messages"][-1]
 
             if isinstance(last_message.content, list):
@@ -146,7 +194,7 @@ class TestFailureAnalyzerAgent:
             logger.error("Agent returned invalid JSON")
             return None
         except Exception as e:
-            logger.error(f"Analysis failed: {e}")
+            logger.error(f"Failed to parse verdict: {e}")
             return None
 
 
