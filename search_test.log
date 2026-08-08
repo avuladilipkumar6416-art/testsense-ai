@@ -1,0 +1,9 @@
+INFO - Browser launched: Chrome 120
+INFO - Navigating to: https://staging.shop.com/search
+INFO - Search input found, entering query: "laptop"
+INFO - Submit button clicked
+WARNING - Waiting for results container... (attempt 1/10)
+WARNING - Waiting for results container... (attempt 2/10)
+WARNING - Waiting for results container... (attempt 3/10)
+ERROR - TimeoutException: Results container not visible after 30s
+INFO - Screenshot captured: search_timeout.png

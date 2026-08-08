@@ -45,6 +45,9 @@ Classification rules:
 - TEST_ISSUE: locator changed, wrong selector, timing, bad test data
 - REAL_BUG: application logic wrong, API error, feature broken
 - ENVIRONMENT_ISSUE: DB down, network failure, infrastructure problem
+-- If the failure could belong to multiple categories, pick the most likely one and set confidence below 70%.
+- Base your verdict on the error message first, log file second.
+ Never contradict a clear error message based on log content alone.
 
 Respond ONLY with the JSON. No extra text."""
 
@@ -207,12 +210,12 @@ if __name__ == "__main__":
     agent = TestFailureAnalyzerAgent()
 
     failure = """
-    Test Name: LoginTest.testValidLogin
-    Error Type: NoSuchElementException
-    Error Message: Unable to locate element: #login-btn
+    Test Name: AdminTest.testDashboardAccess
+    Error Type: AssertionError
+    Error Message: Expected text 'Welcome, Admin' but got 'Welcome, User'
     Stack Trace:
-        at LoginPage.clickLoginButton(LoginPage.java:47)
-        at LoginTest.testValidLogin(LoginTest.java:23)
+        at DashboardPage.verifyWelcomeMessage(DashboardPage.java:34)
+        at AdminTest.testDashboardAccess(AdminTest.java:28)
     Log file: test_sample.log
     Screenshot: fake_screenshot.png
     Environment: staging
